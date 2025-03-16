@@ -6,13 +6,23 @@ import numpy as np
 from scipy import stats
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from auth import logout
 
-# Authentication check
+# Authentication check at the very top
 if 'authenticated' not in st.session_state or not st.session_state.authenticated:
     st.switch_page("pages/Login.py")
 
 # Set page config
-st.set_page_config(page_title="YouTube Channel Dashboard", layout="wide")
+st.set_page_config(page_title="Dashboard - YouTube Analytics", layout="wide")
+
+# Add logout button with a unique key
+if st.sidebar.button("Logout", key="dashboard_logout"):
+    st.session_state.authenticated = False
+    st.session_state.user_name = None
+    st.switch_page("streamlit_app.py")
+
+# Display welcome message
+st.sidebar.markdown(f"Welcome, {st.session_state.user_name}")
 
 # Helper functions
 @st.cache_data
@@ -196,14 +206,6 @@ st.sidebar.image("images/YouTube_logo_(2017).png", width=200)
 
 with st.sidebar:
     st.title("YouTube Channel Dashboard")
-    
-    # Add logout button and user info
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.write(f"Welcome, {st.session_state.user_name}")
-    with col2:
-        if st.button("Logout"):
-            logout()
     
     st.header("⚙️ Controls")
     

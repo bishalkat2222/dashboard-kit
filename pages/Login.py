@@ -22,9 +22,11 @@ def login_page():
                 if login_email and login_password:
                     success, result = authenticate_user(login_email, login_password)
                     if success:
+                        # Set session state first
                         st.session_state.authenticated = True
                         st.session_state.user_name = result
                         st.success(f"Welcome back, {result}!")
+                        # Simple redirect using rerun
                         st.switch_page("pages/Dashboard.py")
                     else:
                         st.error(result)

@@ -135,9 +135,10 @@ def login_page():
 
 def logout():
     """Logout user."""
-    st.session_state.authenticated = False
-    st.session_state.user_name = None
-    st.rerun()
+    if 'authenticated' in st.session_state:
+        st.session_state.authenticated = False
+    if 'user_name' in st.session_state:
+        st.session_state.user_name = None
 
 # Create admin account when module is loaded
 create_admin_account() 

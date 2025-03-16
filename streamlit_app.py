@@ -1,503 +1,363 @@
 import streamlit as st
-import pandas as pd
-from datetime import timedelta, datetime, date
-import plotly.express as px
-import numpy as np
-from scipy import stats
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from auth import login_page, logout
+from auth import login_page
 
-# Set page config
-st.set_page_config(page_title="YouTube Channel Dashboard", layout="wide")
+# Page config
+st.set_page_config(
+    page_title="YouTube Analytics Platform",
+    page_icon="📊",
+    layout="wide",
+)
 
-# Add this at the very beginning of your app (after imports)
-if 'authenticated' not in st.session_state or not st.session_state.authenticated:
-    login_page()
-    st.stop()
-
-# Helper functions
-@st.cache_data
-def load_data():
-    data = pd.read_csv("youtube_channel_data.csv")
-    data['DATE'] = pd.to_datetime(data['DATE'])
-    data['NET_SUBSCRIBERS'] = data['SUBSCRIBERS_GAINED'] - data['SUBSCRIBERS_LOST']
-    return data
-
-def custom_quarter(date):
-    if isinstance(date, (datetime, pd.Timestamp)):
-        month = date.month
-        year = date.year
-    else:  # Handle date objects
-        month = date.month
-        year = date.year
-    
-    if month in [2, 3, 4]:
-        return pd.Period(year=year, quarter=1, freq='Q')
-    elif month in [5, 6, 7]:
-        return pd.Period(year=year, quarter=2, freq='Q')
-    elif month in [8, 9, 10]:
-        return pd.Period(year=year, quarter=3, freq='Q')
-    else:  # month in [11, 12, 1]
-        return pd.Period(year=year if month != 1 else year-1, quarter=4, freq='Q')
-
-def aggregate_data(df, freq):
-    if freq == 'Q':
-        df = df.copy()
-        df['CUSTOM_Q'] = df['DATE'].apply(custom_quarter)
-        df_agg = df.groupby('CUSTOM_Q').agg({
-            'VIEWS': 'sum',
-            'WATCH_HOURS': 'sum',
-            'NET_SUBSCRIBERS': 'sum',
-            'LIKES': 'sum',
-            'COMMENTS': 'sum',
-            'SHARES': 'sum',
-        })
-        return df_agg
-    else:
-        return df.resample(freq, on='DATE').agg({
-            'VIEWS': 'sum',
-            'WATCH_HOURS': 'sum',
-            'NET_SUBSCRIBERS': 'sum',
-            'LIKES': 'sum',
-            'COMMENTS': 'sum',
-            'SHARES': 'sum',
-        })
-
-def get_weekly_data(df):
-    return aggregate_data(df, 'W-MON')
-
-def get_monthly_data(df):
-    return aggregate_data(df, 'M')
-
-def get_quarterly_data(df):
-    return aggregate_data(df, 'Q')
-
-def format_with_commas(number):
-    return f"{number:,}"
-
-def create_metric_chart(df, column, color, chart_type, height=150, time_frame='Daily'):
-    chart_data = df[[column]].copy()
-    if time_frame == 'Quarterly':
-        # Convert Period index to string format
-        chart_data.index = chart_data.index.astype(str)
-    elif not isinstance(chart_data.index, pd.DatetimeIndex):
-        chart_data.index = pd.to_datetime(chart_data.index)
-    
-    if chart_type == 'Bar':
-        st.bar_chart(chart_data, y=column, color=color, height=height)
-    elif chart_type == 'Area':
-        st.area_chart(chart_data, y=column, color=color, height=height)
-    elif chart_type == 'Line':
-        st.line_chart(chart_data, y=column, color=color, height=height)
-    elif chart_type == 'Scatter':
-        # For scatter plot, we need to use Plotly
-        fig = px.scatter(chart_data, y=column)
-        fig.update_traces(marker=dict(color=color))
-        fig.update_layout(height=height, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-
-def is_period_complete(date, freq):
-    today = datetime.now()
-    if freq == 'D':
-        return date.date() < today.date() if isinstance(date, pd.Timestamp) else date < today.date()
-    elif freq == 'W':
-        return date + timedelta(days=6) < today
-    elif freq == 'M':
-        if isinstance(date, pd.Period):
-            date = date.to_timestamp()
-        next_month = date.replace(day=28) + timedelta(days=4)
-        return next_month.replace(day=1) <= today
-    elif freq == 'Q':
-        if isinstance(date, pd.Period):
-            return date < pd.Period(today, freq='Q')
-        current_quarter = custom_quarter(today)
-        return date < current_quarter
-
-def calculate_delta(df, column):
-    if len(df) < 2:
-        return 0, 0
-    current_value = df[column].iloc[-1]
-    previous_value = df[column].iloc[-2]
-    delta = current_value - previous_value
-    delta_percent = (delta / previous_value) * 100 if previous_value != 0 else 0
-    return delta, delta_percent
-
-def display_metric(col, title, value, df, column, color, time_frame):
-    with col:
-        with st.container(border=True):
-            delta, delta_percent = calculate_delta(df, column)
-            delta_str = f"{delta:+,.0f} ({delta_percent:+.2f}%)"
-            st.metric(title, format_with_commas(value), delta=delta_str)
-            create_metric_chart(df, column, color, time_frame=time_frame, chart_type=chart_selection)
-            
-            last_period = df.index[-1]
-            freq = {'Daily': 'D', 'Weekly': 'W', 'Monthly': 'M', 'Quarterly': 'Q'}[time_frame]
-            if not is_period_complete(last_period, freq):
-                st.caption(f"Note: The last {time_frame.lower()[:-2] if time_frame != 'Daily' else 'day'} is incomplete.")
-
-def calculate_performance_metrics(df):
-    metrics = {
-        "Average Views per Day": df['VIEWS'].mean(),
-        "Peak Views": df['VIEWS'].max(),
-        "Average Watch Hours": df['WATCH_HOURS'].mean(),
-        "Subscriber Growth Rate": (df['NET_SUBSCRIBERS'].sum() / len(df)) * 100,
-        "Engagement Rate": ((df['LIKES'].sum() + df['COMMENTS'].sum()) / df['VIEWS'].sum()) * 100,
-        "Best Performing Day": df['VIEWS'].idxmax().strftime('%Y-%m-%d'),
+# Custom CSS for better styling
+st.markdown("""
+    <style>
+    .main {
+        padding: 0rem;
     }
-    return metrics
-
-def calculate_growth_metrics(df):
-    metrics = {}
+    .stButton>button {
+        background-color: #FF0000;
+        color: white;
+        border-radius: 20px;
+        padding: 0.5rem 2rem;
+        border: none;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        background-color: #CC0000;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .hero-text {
+        font-size: 4rem;
+        font-weight: 700;
+        background: linear-gradient(45deg, #FF0000, #FF6B6B);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .feature-card {
+        background-color: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin: 1rem 0;
+        transition: transform 0.3s ease;
+    }
+    .feature-card:hover {
+        transform: translateY(-5px);
+    }
     
-    # Calculate day-over-day growth rates
-    for column in ['VIEWS', 'WATCH_HOURS', 'NET_SUBSCRIBERS']:
-        pct_change = df[column].pct_change() * 100
-        metrics[f"{column}_avg_growth"] = pct_change.mean()
-        metrics[f"{column}_volatility"] = pct_change.std()
+    /* Dark theme adjustments */
+    .stApp {
+        background-color: #0E1117;
+    }
     
-    return metrics
-
-def create_distribution_plot(df, metric):
-    fig = make_subplots(rows=2, cols=1, subplot_titles=(f'{metric} Distribution', f'{metric} Q-Q Plot'))
+    /* Enhanced feature cards */
+    .feature-card {
+        background-color: #1E2329;
+        color: #E6E6E6;
+        padding: 2rem;
+        border-radius: 15px;
+        box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        margin: 1rem 0;
+        transition: all 0.3s ease;
+        border: 1px solid #2E3338;
+    }
+    .feature-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 12px 20px rgba(0,0,0,0.3);
+        border-color: #FF0000;
+    }
+    .feature-card h3 {
+        color: #FF0000;
+        margin-bottom: 1rem;
+    }
+    .feature-card ul {
+        list-style-type: none;
+        padding-left: 0;
+    }
+    .feature-card li {
+        margin: 0.8rem 0;
+        padding-left: 1.5rem;
+        position: relative;
+    }
+    .feature-card li:before {
+        content: "→";
+        color: #FF0000;
+        position: absolute;
+        left: 0;
+    }
     
-    # Histogram
-    fig.add_trace(
-        go.Histogram(x=df[metric], name='Distribution', nbinsx=30),
-        row=1, col=1
-    )
+    /* Enhanced buttons */
+    .stButton>button {
+        background: linear-gradient(45deg, #FF0000, #FF6B6B);
+        color: white;
+        border-radius: 25px;
+        padding: 0.6rem 2.5rem;
+        font-weight: 600;
+        border: none;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        background: linear-gradient(45deg, #CC0000, #FF4444);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 15px rgba(255,0,0,0.2);
+    }
     
-    # Q-Q Plot
-    qq = stats.probplot(df[metric], dist="norm")
-    fig.add_trace(
-        go.Scatter(x=qq[0][0], y=qq[0][1], mode='markers', name='Q-Q Plot'),
-        row=2, col=1
-    )
+    /* Enhanced hero section */
+    .hero-text {
+        font-size: 4.5rem;
+        font-weight: 800;
+        background: linear-gradient(45deg, #FF0000, #FF6B6B);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 1.5rem;
+    }
     
-    fig.update_layout(height=600, showlegend=False)
-    return fig
-
-def create_boxplot(df, metrics):
-    fig = go.Figure()
-    for metric in metrics:
-        # Normalize the data for comparison
-        normalized_data = (df[metric] - df[metric].mean()) / df[metric].std()
-        fig.add_trace(go.Box(y=normalized_data, name=metric))
+    /* Steps section */
+    .step-card {
+        background-color: #1E2329;
+        padding: 1.5rem;
+        border-radius: 12px;
+        text-align: center;
+        border: 1px solid #2E3338;
+        transition: all 0.3s ease;
+    }
+    .step-card:hover {
+        transform: translateY(-3px);
+        border-color: #FF0000;
+    }
+    .step-number {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #FF0000;
+        margin-bottom: 0.5rem;
+    }
     
-    fig.update_layout(
-        title="Normalized Metric Distributions",
-        yaxis_title="Standard Deviations from Mean"
-    )
-    return fig
-
-# Load data
-df = load_data()
-
-# Set up input widgets
-
-st.sidebar.image("images/YouTube_logo_(2017).png", width=200)
-
-with st.sidebar:
-    st.title("YouTube Channel Dashboard")
+    /* Call to action section */
+    .cta-section {
+        background: linear-gradient(135deg, #1E2329, #2E3338);
+        padding: 3rem;
+        border-radius: 20px;
+        margin: 3rem 0;
+        border: 1px solid #FF0000;
+    }
     
-    # Add logout button and user info
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.write(f"Welcome, {st.session_state.user_name}")
-    with col2:
-        if st.button("Logout"):
-            logout()
-    
-    st.header("⚙️ Controls")
-    
-    max_date = df['DATE'].max().date()
-    min_date = df['DATE'].min().date()
-    default_start_date = max_date - timedelta(days=365)  # Show a year by default
-    default_end_date = max_date
-    
-    start_date = st.date_input("Start date", default_start_date, min_value=min_date, max_value=max_date)
-    end_date = st.date_input("End date", default_end_date, min_value=min_date, max_value=max_date)
-    
-    if start_date > end_date:
-        st.error("Error: End date must be after start date.")
-        st.stop()
+    /* Footer */
+    .footer {
+        border-top: 1px solid #2E3338;
+        margin-top: 3rem;
+        padding: 2rem 0;
+        color: #888;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-    time_frame = st.selectbox("Select time frame",
-                              ("Daily", "Weekly", "Monthly", "Quarterly"),
-    )
-    chart_selection = st.selectbox(
-        "Select a chart type",
-        ("Bar", "Area", "Line", "Scatter"),
-        help="Choose how to visualize your metrics"
-    )
+# Initialize session state
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
 
-    # Add chart customization options
-    if chart_selection == "Scatter":
-        st.caption("💡 Scatter plots are useful for identifying outliers and patterns")
-    elif chart_selection == "Line":
-        st.caption("💡 Line charts are great for showing trends over time")
-    elif chart_selection == "Area":
-        st.caption("💡 Area charts emphasize the magnitude of changes")
-    elif chart_selection == "Bar":
-        st.caption("💡 Bar charts are perfect for comparing discrete values")
+# Navigation buttons - replace the current navigation section with this:
+st.markdown("""
+    <div style='position: absolute; right: 20px; top: 20px; display: flex; gap: 10px;'>
+        <a href="Signup" target="_self" style='
+            text-decoration: none;
+            color: white;
+            background: transparent;
+            padding: 8px 25px;
+            border: 2px solid #FF0000;
+            border-radius: 25px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: inline-block;
+            hover: {
+                background: #FF0000;
+                transform: translateY(-2px);
+            }
+        '>Sign Up</a>
+        <a href="Login" target="_self" style='
+            text-decoration: none;
+            color: white;
+            background: #FF0000;
+            padding: 8px 25px;
+            border: 2px solid #FF0000;
+            border-radius: 25px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: inline-block;
+            hover: {
+                background: #CC0000;
+                transform: translateY(-2px);
+            }
+        '>Sign In</a>
+    </div>
+""", unsafe_allow_html=True)
 
-    # Add to the sidebar section
-    st.markdown("---")
-    st.markdown("### ⚙️ Display Settings")
-    
-    # Theme selection
-    theme = st.selectbox(
-        "Color Theme",
-        ["Default", "Dark", "Light"]
-    )
-    
-    # Chart animation
-    enable_animation = st.toggle("Enable Chart Animations", value=True)
-    
-    # Decimal precision
-    decimal_places = st.slider("Decimal Places", 0, 4, 2)
-    
-    st.markdown("---")
-    st.markdown("### 📱 Contact")
-    st.markdown("[GitHub](https://github.com/yourusername)")
-    st.markdown("[Twitter](https://twitter.com/yourusername)")
+# Add some spacing after the navigation
+st.markdown("<div style='height: 80px;'></div>", unsafe_allow_html=True)
 
-# Prepare data based on selected time frame
-if time_frame == 'Daily':
-    df_display = df.set_index('DATE')
-elif time_frame == 'Weekly':
-    df_display = get_weekly_data(df)
-elif time_frame == 'Monthly':
-    df_display = get_monthly_data(df)
-elif time_frame == 'Quarterly':
-    df_display = get_quarterly_data(df)
+# Hero Section with gradient text
+st.markdown("""
+    <div style='text-align: center; padding: 3rem 0;'>
+        <h1 class='hero-text'>Transform Your YouTube Success</h1>
+        <p style='font-size: 1.5rem; color: #666; margin-top: 1rem;'>
+            Powerful analytics and insights to grow your channel
+        </p>
+    </div>
+""", unsafe_allow_html=True)
 
-# Display Key Metrics
-st.subheader("All-Time via Cursor Statistics")
+# Features Section with cards
+st.markdown("## 🚀 Key Features")
+col1, col2, col3 = st.columns(3)
 
-metrics = [
-    ("Total Subscribers", "NET_SUBSCRIBERS", '#29b5e8'),
-    ("Total Views", "VIEWS", '#FF9F36'),
-    ("Total Watch Hours", "WATCH_HOURS", '#D45B90'),
-    ("Total Likes", "LIKES", '#7D44CF')
-]
+with col1:
+    st.markdown("""
+    <div class='feature-card'>
+        <h3>📊 Comprehensive Analytics</h3>
+        <ul>
+            <li>Real-time performance tracking</li>
+            <li>Advanced metric visualization</li>
+            <li>Custom date range analysis</li>
+            <li>Trend identification</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
-cols = st.columns(4)
-for col, (title, column, color) in zip(cols, metrics):
-    total_value = df[column].sum()
-    display_metric(col, title, total_value, df_display, column, color, time_frame)
+with col2:
+    st.markdown("""
+    <div class='feature-card'>
+        <h3>📈 Growth Insights</h3>
+        <ul>
+            <li>Subscriber growth tracking</li>
+            <li>Engagement rate analysis</li>
+            <li>Performance predictions</li>
+            <li>Goal setting and tracking</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Display Key Metrics
-if df_display.empty:
-    st.warning("No data available for the selected date range.")
-    st.stop()
+with col3:
+    st.markdown("""
+    <div class='feature-card'>
+        <h3>🎯 Strategic Tools</h3>
+        <ul>
+            <li>Content performance metrics</li>
+            <li>Audience behavior analysis</li>
+            <li>Statistical analysis</li>
+            <li>Seasonal pattern detection</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
-st.subheader("Selected Duration")
+# How It Works Section with numbered steps
+st.markdown("## 🔄 How It Works")
+steps = st.columns(4)
 
-if time_frame == 'Quarterly':
-    start_quarter = custom_quarter(start_date)
-    end_quarter = custom_quarter(end_date)
-    mask = (df_display.index >= start_quarter) & (df_display.index <= end_quarter)
-else:
-    mask = (df_display.index >= pd.Timestamp(start_date)) & (df_display.index <= pd.Timestamp(end_date))
-df_filtered = df_display.loc[mask]
+for i, (title, desc) in enumerate([
+    ("Sign Up", "Create your account in minutes"),
+    ("Import Data", "Connect your YouTube channel"),
+    ("Analyze", "Get instant insights"),
+    ("Optimize", "Grow your channel")
+], 1):
+    with steps[i-1]:
+        st.markdown(f"""
+        <div style='text-align: center; padding: 1rem;'>
+            <h3 style='color: #FF0000;'>{i}. {title}</h3>
+            <p>{desc}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-cols = st.columns(4)
-for col, (title, column, color) in zip(cols, metrics):
-    display_metric(col, title.split()[-1], df_filtered[column].sum(), df_filtered, column, color, time_frame)
-
-# Add after the DataFrame display
-st.subheader("🎯 Goal Tracking")
-
-with st.expander("Set and Track Goals"):
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        goal_metric = st.selectbox(
-            "Select Metric",
-            ["VIEWS", "SUBSCRIBERS", "WATCH_HOURS", "LIKES"]
-        )
-        
-    with col2:
-        goal_value = st.number_input(
-            "Goal Value",
-            min_value=0,
-            value=10000
-        )
-        
-    with col3:
-        goal_date = st.date_input(
-            "Target Date",
-            min_value=date.today()
-        )
-    
-    # Calculate progress
-    current_value = df_filtered[goal_metric].sum()
-    progress = (current_value / goal_value) * 100
-    
-    st.progress(min(progress / 100, 1.0))
-    st.metric(
-        "Progress",
-        f"{current_value:,.0f} / {goal_value:,.0f}",
-        f"{progress:.1f}%"
-    )
-
-# DataFrame display
-with st.expander('See DataFrame (Selected time frame)'):
-    st.dataframe(df_filtered)
-
-# Add this before the DataFrame display
-st.subheader("📊 Channel Performance Analysis")
+# Benefits Section with two columns
+st.markdown("## 💪 Why Choose Us")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### Key Performance Indicators")
-    metrics = calculate_performance_metrics(df_filtered)
-    for metric, value in metrics.items():
-        if isinstance(value, (int, float)):
-            if metric.endswith("Rate"):
-                st.metric(metric, f"{value:.2f}%")
-            else:
-                st.metric(metric, f"{value:,.0f}")
-        else:
-            st.metric(metric, value)
+    st.markdown("""
+    <div class='feature-card'>
+        <h3>For Content Creators</h3>
+        <ul>
+            <li>Track your channel's growth</li>
+            <li>Understand your audience</li>
+            <li>Optimize upload timing</li>
+            <li>Monitor engagement metrics</li>
+            <li>Set and track goals</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
 with col2:
-    st.markdown("### Trend Analysis")
-    trend_metric = st.selectbox("Select metric to analyze", 
-                              ["VIEWS", "WATCH_HOURS", "NET_SUBSCRIBERS", "LIKES"])
-    
-    # Calculate rolling average
-    rolling_data = df_filtered[trend_metric].rolling(window=7).mean()
-    fig = px.line(rolling_data, title=f'7-Day Rolling Average: {trend_metric}')
-    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("""
+    <div class='feature-card'>
+        <h3>For Businesses</h3>
+        <ul>
+            <li>Brand performance tracking</li>
+            <li>Competitor analysis</li>
+            <li>ROI measurement</li>
+            <li>Content strategy insights</li>
+            <li>Team collaboration tools</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Add after the Performance Analysis section
-st.subheader("🔄 Metric Correlations")
+# Update the CTA section to use dark theme colors
+st.markdown("""
+    <div class='cta-section'>
+        <h2 style='color: #FFFFFF; text-align: center; font-size: 2.5rem;'>Ready to Transform Your YouTube Channel?</h2>
+        <p style='font-size: 1.2rem; color: #CCCCCC; text-align: center; margin: 1rem 0;'>
+            Join thousands of content creators who are growing their channels with data-driven insights
+        </p>
+    </div>
+""", unsafe_allow_html=True)
 
-correlation_metrics = ['VIEWS', 'WATCH_HOURS', 'NET_SUBSCRIBERS', 'LIKES', 'COMMENTS', 'SHARES']
-correlation_matrix = df_filtered[correlation_metrics].corr()
+# Centered Get Started button
+col1, col2, col3 = st.columns([2,1,2])
+with col2:
+    if st.button("Get Started", type="primary", use_container_width=True, key="cta_button"):
+        st.switch_page("pages/Signup.py")
 
-fig = px.imshow(
-    correlation_matrix,
-    labels=dict(color="Correlation"),
-    color_continuous_scale="RdBu",
-    aspect="auto"
-)
-fig.update_layout(title="Correlation Heatmap")
-st.plotly_chart(fig, use_container_width=True)
+# Divider before footer
+st.markdown("<hr style='border: none; border-top: 1px solid #2E3338; margin: 3rem 0;'>", unsafe_allow_html=True)
 
-# Show strongest correlations
-st.markdown("### Strongest Correlations")
-correlations = []
-for i in range(len(correlation_metrics)):
-    for j in range(i+1, len(correlation_metrics)):
-        correlations.append({
-            'Metrics': f"{correlation_metrics[i]} vs {correlation_metrics[j]}",
-            'Correlation': correlation_matrix.iloc[i,j]
-        })
+# Create three columns for the footer sections
+col1, col2, col3 = st.columns(3)
 
-correlations_df = pd.DataFrame(correlations)
-correlations_df = correlations_df.sort_values('Correlation', key=abs, ascending=False)
-st.dataframe(correlations_df)
+with col1:
+    st.markdown("<h4 style='color: #FFFFFF; margin-bottom: 1rem;'>Resources</h4>", unsafe_allow_html=True)
+    st.markdown("""
+        <div style='margin-bottom: 2rem;'>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Documentation</a>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Blog</a>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Case Studies</a>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Help Center</a>
+        </div>
+    """, unsafe_allow_html=True)
 
-# Add this new section before the DataFrame display
-st.subheader("📈 Advanced Analytics Dashboard")
+with col2:
+    st.markdown("<h4 style='color: #FFFFFF; margin-bottom: 1rem;'>Company</h4>", unsafe_allow_html=True)
+    st.markdown("""
+        <div style='margin-bottom: 2rem;'>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>About Us</a>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Careers</a>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Contact</a>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Partners</a>
+        </div>
+    """, unsafe_allow_html=True)
 
-# Create tabs for different analyses
-tab1, tab2, tab3 = st.tabs(["Growth Analysis", "Statistical Distribution", "Seasonal Patterns"])
+with col3:
+    st.markdown("<h4 style='color: #FFFFFF; margin-bottom: 1rem;'>Legal</h4>", unsafe_allow_html=True)
+    st.markdown("""
+        <div style='margin-bottom: 2rem;'>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Privacy Policy</a>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Terms of Service</a>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Cookie Policy</a>
+            <a href="#" style='color: #888888; text-decoration: none; display: block; margin: 0.5rem 0;'>Security</a>
+        </div>
+    """, unsafe_allow_html=True)
 
-with tab1:
-    st.markdown("### Growth Metrics")
-    growth_metrics = calculate_growth_metrics(df_filtered)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("#### Average Daily Growth Rates")
-        for metric in ['VIEWS', 'WATCH_HOURS', 'NET_SUBSCRIBERS']:
-            st.metric(
-                f"{metric.replace('_', ' ')} Growth",
-                f"{growth_metrics[f'{metric}_avg_growth']:.2f}%",
-                help="Average day-over-day growth rate"
-            )
-    
-    with col2:
-        st.markdown("#### Metric Volatility")
-        for metric in ['VIEWS', 'WATCH_HOURS', 'NET_SUBSCRIBERS']:
-            st.metric(
-                f"{metric.replace('_', ' ')} Volatility",
-                f"{growth_metrics[f'{metric}_volatility']:.2f}%",
-                help="Standard deviation of daily growth rates"
-            )
-    
-    # Growth trends visualization
-    st.markdown("### Growth Trends")
-    growth_metric = st.selectbox(
-        "Select metric for growth analysis",
-        ['VIEWS', 'WATCH_HOURS', 'NET_SUBSCRIBERS']
-    )
-    
-    growth_data = df_filtered[growth_metric].pct_change() * 100
-    fig = px.line(growth_data, title=f'{growth_metric} Daily Growth Rate (%)')
-    st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    st.markdown("### Statistical Distribution Analysis")
-    
-    dist_metric = st.selectbox(
-        "Select metric to analyze",
-        ['VIEWS', 'WATCH_HOURS', 'NET_SUBSCRIBERS', 'LIKES', 'COMMENTS']
-    )
-    
-    # Create and display distribution plots
-    dist_fig = create_distribution_plot(df_filtered, dist_metric)
-    st.plotly_chart(dist_fig, use_container_width=True)
-    
-    # Add statistical tests
-    st.markdown("#### Statistical Tests")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Normality test
-        stat, p_value = stats.normaltest(df_filtered[dist_metric])
-        st.metric("Normality Test p-value", f"{p_value:.4f}")
-        if p_value < 0.05:
-            st.caption("❗ Data is not normally distributed (p < 0.05)")
-        else:
-            st.caption("✅ Data appears normally distributed (p >= 0.05)")
-    
-    with col2:
-        # Basic statistics
-        st.metric("Skewness", f"{stats.skew(df_filtered[dist_metric]):.4f}")
-        st.metric("Kurtosis", f"{stats.kurtosis(df_filtered[dist_metric]):.4f}")
-
-with tab3:
-    st.markdown("### Seasonal Pattern Analysis")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        # Day of week analysis
-        df_filtered['DayOfWeek'] = df_filtered.index.dayofweek
-        dow_avg = df_filtered.groupby('DayOfWeek')['VIEWS'].mean()
-        fig = px.bar(
-            x=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-            y=dow_avg.values,
-            title="Average Views by Day of Week"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        # Month analysis
-        df_filtered['Month'] = df_filtered.index.month
-        month_avg = df_filtered.groupby('Month')['VIEWS'].mean()
-        fig = px.bar(
-            x=['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-            y=month_avg.values,
-            title="Average Views by Month"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Box plot comparison
-    st.markdown("### Metric Comparisons")
-    comparison_fig = create_boxplot(df_filtered, ['VIEWS', 'WATCH_HOURS', 'NET_SUBSCRIBERS', 'LIKES'])
-    st.plotly_chart(comparison_fig, use_container_width=True)
+# Bottom footer
+st.markdown("""
+    <div style='text-align: center; padding: 2rem 0; border-top: 1px solid #2E3338; margin-top: 2rem;'>
+        <p style='color: #888888; margin-bottom: 0.5rem;'>© 2024 YouTube Analytics Platform. All rights reserved.</p>
+        <p style='color: #888888; font-size: 0.8rem;'>Made with <span style='color: #FF0000;'>❤️</span> for content creators</p>
+    </div>
+""", unsafe_allow_html=True) 
