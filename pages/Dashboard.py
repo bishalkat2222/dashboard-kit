@@ -6,15 +6,13 @@ import numpy as np
 from scipy import stats
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from auth import login_page, logout
+
+# Authentication check
+if 'authenticated' not in st.session_state or not st.session_state.authenticated:
+    st.switch_page("pages/Login.py")
 
 # Set page config
 st.set_page_config(page_title="YouTube Channel Dashboard", layout="wide")
-
-# Add this at the very beginning of your app (after imports)
-if 'authenticated' not in st.session_state or not st.session_state.authenticated:
-    login_page()
-    st.stop()
 
 # Helper functions
 @st.cache_data
@@ -194,7 +192,6 @@ def create_boxplot(df, metrics):
 df = load_data()
 
 # Set up input widgets
-
 st.sidebar.image("images/YouTube_logo_(2017).png", width=200)
 
 with st.sidebar:
@@ -500,4 +497,4 @@ with tab3:
     # Box plot comparison
     st.markdown("### Metric Comparisons")
     comparison_fig = create_boxplot(df_filtered, ['VIEWS', 'WATCH_HOURS', 'NET_SUBSCRIBERS', 'LIKES'])
-    st.plotly_chart(comparison_fig, use_container_width=True)
+    st.plotly_chart(comparison_fig, use_container_width=True) 
