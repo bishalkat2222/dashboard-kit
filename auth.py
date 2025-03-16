@@ -1,16 +1,21 @@
 import streamlit as st
 import pandas as pd
-import hashlib
 from pathlib import Path
 import os
+import base64
+from hmac import compare_digest
 
 def make_hashed_password(password):
     """Hash a password for storing."""
-    return hashlib.sha256(str.encode(password)).hexdigest()
+    # Using base64 encoding instead of hashlib
+    return base64.b64encode(password.encode()).decode()
 
 def check_password(password, hashed_password):
     """Check hashed password against stored password."""
-    return make_hashed_password(password) == hashed_password
+    return compare_digest(
+        make_hashed_password(password),
+        hashed_password
+    )
 
 def load_users():
     """Load users from CSV file."""
@@ -36,7 +41,8 @@ def create_user(email, password, name):
     new_user = pd.DataFrame({
         'email': [email],
         'password': [hashed_password],
-        'name': [name]
+        'name': [name],
+        'role': ['user']
     })
     users_df = pd.concat([users_df, new_user], ignore_index=True)
     save_users(users_df)
@@ -52,6 +58,29 @@ def authenticate_user(email, password):
     if check_password(password, user['password'].iloc[0]):
         return True, user['name'].iloc[0]
     return False, "Incorrect password"
+
+def create_admin_account():
+    """Create admin account if it doesn't exist."""
+    users_df = load_users()
+    admin_email = "admin@example.com"
+    
+    if admin_email not in users_df['email'].values:
+        admin_password = "admin123"
+        hashed_password = make_hashed_password(admin_password)
+        admin_user = pd.DataFrame({
+            'email': [admin_email],
+            'password': [hashed_password],
+            'name': ['Admin'],
+            'role': ['admin']
+        })
+        users_df = pd.concat([users_df, admin_user], ignore_index=True)
+        save_users(users_df)
+        print(f"""
+        Admin account created:
+        Email: {admin_email}
+        Password: {admin_password}
+        Please change these credentials after first login.
+        """)
 
 def login_page():
     """Display login page."""
@@ -109,29 +138,6 @@ def logout():
     st.session_state.authenticated = False
     st.session_state.user_name = None
     st.rerun()
-
-def create_admin_account():
-    """Create admin account if it doesn't exist."""
-    users_df = load_users()
-    admin_email = "admin@example.com"
-    
-    if admin_email not in users_df['email'].values:
-        admin_password = "admin123"  # You should change this password
-        hashed_password = make_hashed_password(admin_password)
-        admin_user = pd.DataFrame({
-            'email': [admin_email],
-            'password': [hashed_password],
-            'name': ['Admin'],
-            'role': ['admin']  # Adding role field
-        })
-        users_df = pd.concat([users_df, admin_user], ignore_index=True)
-        save_users(users_df)
-        print(f"""
-        Admin account created:
-        Email: {admin_email}
-        Password: {admin_password}
-        Please change these credentials after first login.
-        """)
 
 # Create admin account when module is loaded
 create_admin_account() 
